@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>DNS Queries Per Hour</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body { max-width: 900px; margin: 40px auto; font-family: Arial, sans-serif; }
+  canvas { max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+  th { background: #eee; }
+</style>
+</head>
+<body>
+<h2>DNS Queries Per Hour (Last 48 Hours)</h2>
+<canvas id="dnsChart"></canvas>
+
+<h3 id="selectedHourTitle" style="margin-top: 40px;">Select a bar to see DNS queries</h3>
+<table id="queriesTable" style="display:none;">
+  <thead>
+    <tr>
+      <th>Timestamp</th>
+      <th>Source IP</th>
+      <th>Destination IP</th>
+      <th>Query Name</th>
+      <th>Type</th>
+      <th>Class</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+let dnsChart = null;
+
+async function fetchData() {
+  const res = await fetch('/api/queries-per-hour');
+  if (!res.ok) {
+    alert('Failed to load data');
+    return [];
+  }
+  return await res.json();
+}
+
+async function fetchQueriesByHour(hour) {
+  const res = await fetch('/api/queries-by-hour?hour=' + encodeURIComponent(hour));
+  if (!res.ok) {
+    alert('Failed to load queries for ' + hour);
+    return [];
+  }
+  return await res.json();
+}
+
+function renderChart(data) {
+  const ctx = document.getElementById('dnsChart').getContext('2d');
+  const labels = data.map(d => d.hour);
+  const counts = data.map(d => d.count);
+
+  if (dnsChart) {
+    dnsChart.destroy();
+  }
+
+  dnsChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'DNS Queries',
+        data: counts,
+        backgroundColor: 'rgba(54, 162, 235, 0.7)'
+      }]
+    },
+    options: {
+      scales: {
+        x: { title: { display: true, text: 'Hour' } },
+        y: { title: { display: true, text: 'Query Count' }, beginAtZero: true }
+      },
+      onClick: async (evt) => {
+        const points = dnsChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, false);
+        if (points.length === 0) return;
+        const idx = points[0].index;
+        const hour = dnsChart.data.labels[idx];
+        document.getElementById('selectedHourTitle').textContent = `DNS Queries for Hour: ${hour}`;
+
+        const queries = await fetchQueriesByHour(hour);
+        renderQueriesTable(queries);
+      }
+    }
+  });
+}
+
+function renderQueriesTable(queries) {
+  const table = document.getElementById('queriesTable');
+  const tbody = table.querySelector('tbody');
+  tbody.innerHTML = '';
+
+  if (queries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6">No DNS queries found for this hour.</td></tr>';
+  } else {
+    for (const q of queries) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${q.timestamp}</td>
+        <td>${q.src_ip}</td>
+        <td>${q.dst_ip}</td>
+        <td>${q.name}</td>
+        <td>${q.type}</td>
+        <td>${q.class}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  table.style.display = 'table';
+}
+
+fetchData().then(data => renderChart(data));
+</script>
+</body>
+</html>
+
