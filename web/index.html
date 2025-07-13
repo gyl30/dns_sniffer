@@ -1,122 +1,259 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>DNS Queries Per Hour</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<style>
-  body { max-width: 900px; margin: 40px auto; font-family: Arial, sans-serif; }
-  canvas { max-width: 100%; }
-  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-  th { background: #eee; }
-</style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DNS Analytics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f5; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { color: #1a202c; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .time-selector { display: flex; }
+        .time-selector button { font-size: 0.9rem; padding: 8px 12px; margin-left: 8px; border: 1px solid #cbd5e0; background-color: white; border-radius: 6px; cursor: pointer; transition: background-color 0.2s, border-color 0.2s; }
+        .time-selector button:hover { background-color: #e2e8f0; }
+        .time-selector button.active { background-color: #3182ce; color: white; border-color: #3182ce; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+        .card { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
+        .card h2 { margin: 0 0 10px 0; font-size: 1rem; color: #718096; text-transform: uppercase; }
+        .kpi-value { font-size: 2.5rem; font-weight: 600; color: #2d3748; }
+        .chart-container { margin-top: 30px; background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .table-container { flex-grow: 1; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; word-break: break-all; }
+        th { font-weight: 600; color: #4a5568; }
+        td:last-child { text-align: right; }
+        th:last-child { text-align: right; }
+        .clickable-link { color: #3182ce; text-decoration: none; cursor: pointer; font-weight: 500; }
+        .clickable-link:hover { text-decoration: underline; }
+        .loader { text-align: center; padding: 20px; color: #718096; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background-color: white; padding: 25px; border-radius: 8px; width: 90%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; margin-bottom: 15px; }
+        .modal-title { margin: 0; font-size: 1.25rem; word-break: break-all; }
+        .modal-close { font-size: 1.5rem; font-weight: bold; cursor: pointer; border: none; background: none; color: #718096; }
+        .modal-body { overflow-y: auto; }
+    </style>
 </head>
 <body>
-<h2>DNS Queries Per Hour (Last 48 Hours)</h2>
-<canvas id="dnsChart"></canvas>
+    <div class="container">
+        <div class="header">
+            <h1>DNS Analytics Dashboard</h1>
+            <div class="time-selector">
+                <button class="range-btn active" data-range="24h">24 Hours</button>
+                <button class="range-btn" data-range="7d">7 Days</button>
+                <button class="range-btn" data-range="30d">30 Days</button>
+            </div>
+        </div>
+        
+        <div class="grid" id="kpi-grid">
+            <div class="card"><h2>Total Queries</h2><div id="kpi-total-queries" class="kpi-value loader">...</div></div>
+            <div class="card"><h2>Unique Domains</h2><div id="kpi-unique-domains" class="kpi-value loader">...</div></div>
+            <div class="card"><h2>Avg. Response Time</h2><div id="kpi-avg-response" class="kpi-value loader">...</div></div>
+        </div>
 
-<h3 id="selectedHourTitle" style="margin-top: 40px;">Select a bar to see DNS queries</h3>
-<table id="queriesTable" style="display:none;">
-  <thead>
-    <tr>
-      <th>Timestamp</th>
-      <th>Source IP</th>
-      <th>Destination IP</th>
-      <th>Query Name</th>
-      <th>Type</th>
-      <th>Class</th>
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
+        <div class="chart-container">
+            <canvas id="timeseries-chart"></canvas>
+        </div>
+
+        <div class="grid" style="margin-top: 20px;">
+            <div class="card">
+                <h2>Top Queried Domains</h2>
+                <div id="top-domains-container" class="table-container"><div class="loader">...</div></div>
+            </div>
+            <div class="card">
+                <h2>Top DNS Servers</h2>
+                <div id="top-servers-container" class="table-container"><div class="loader">...</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="details-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title" class="modal-title">Details</h2>
+                <button id="modal-close" class="modal-close">×</button>
+            </div>
+            <div id="modal-body" class="modal-body">
+                <div class="loader">Loading details...</div>
+            </div>
+        </div>
+    </div>
 
 <script>
-let dnsChart = null;
+    document.addEventListener('DOMContentLoaded', () => {
+        const API_BASE = '/api/v2/overview';
+        let timeseriesChart = null;
+        let currentRange = '24h';
 
-async function fetchData() {
-  const res = await fetch('/api/queries-per-hour');
-  if (!res.ok) {
-    alert('Failed to load data');
-    return [];
-  }
-  return await res.json();
-}
+        const fetchData = async (endpoint, range) => {
+            try {
+                let url = `${API_BASE}${endpoint}`;
+                if (range) {
+                    url += url.includes('?') ? `&range=${range}` : `?range=${range}`;
+                }
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                console.error(`Failed to fetch ${endpoint} for range ${range}:`, error);
+                return null;
+            }
+        };
 
-async function fetchQueriesByHour(hour) {
-  const res = await fetch('/api/queries-by-hour?hour=' + encodeURIComponent(hour));
-  if (!res.ok) {
-    alert('Failed to load queries for ' + hour);
-    return [];
-  }
-  return await res.json();
-}
+        const renderKPIs = (data) => {
+            if (!data) return;
+            document.getElementById('kpi-total-queries').textContent = data.total_queries.toLocaleString();
+            document.getElementById('kpi-unique-domains').textContent = data.unique_domains.toLocaleString();
+            document.getElementById('kpi-avg-response').textContent = `${data.avg_response_ms} ms`;
+        };
 
-function renderChart(data) {
-  const ctx = document.getElementById('dnsChart').getContext('2d');
-  const labels = data.map(d => d.hour);
-  const counts = data.map(d => d.count);
+        const renderTimeseriesChart = (data) => {
+            if (!data) return;
+            const ctx = document.getElementById('timeseries-chart').getContext('2d');
+            const labels = data.map(d => d.time_unit);
+            const counts = data.map(d => d.count);
+            
+            const timeConfig = {
+                '24h': { unit: 'hour', display: 'h a', tooltip: 'MMM d, h a'},
+                '7d':  { unit: 'day',  display: 'MMM d', tooltip: 'MMM d, yyyy'},
+                '30d': { unit: 'day',  display: 'MMM d', tooltip: 'MMM d, yyyy'}
+            };
+            const currentConfig = timeConfig[currentRange];
 
-  if (dnsChart) {
-    dnsChart.destroy();
-  }
+            if (timeseriesChart) timeseriesChart.destroy();
 
-  dnsChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'DNS Queries',
-        data: counts,
-        backgroundColor: 'rgba(54, 162, 235, 0.7)'
-      }]
-    },
-    options: {
-      scales: {
-        x: { title: { display: true, text: 'Hour' } },
-        y: { title: { display: true, text: 'Query Count' }, beginAtZero: true }
-      },
-      onClick: async (evt) => {
-        const points = dnsChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, false);
-        if (points.length === 0) return;
-        const idx = points[0].index;
-        const hour = dnsChart.data.labels[idx];
-        document.getElementById('selectedHourTitle').textContent = `DNS Queries for Hour: ${hour}`;
+            timeseriesChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets: [{
+                    label: 'DNS Queries', data: counts, borderColor: 'rgb(54, 162, 235)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.1)', fill: true, tension: 0.3,
+                }]},
+                options: {
+                    scales: {
+                        x: { type: 'time', time: { unit: currentConfig.unit, tooltipFormat: currentConfig.tooltip, displayFormats: { [currentConfig.unit]: currentConfig.display }},
+                            title: { display: true, text: 'Time' },
+                            ticks: { autoSkip: true, maxTicksLimit: 12, maxRotation: 0, minRotation: 0 }
+                        },
+                        y: { beginAtZero: true, title: { display: true, text: 'Query Count' }}
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        };
+        
+        const renderTable = (containerId, headers, data, dataKeys, linkKey) => {
+            const container = document.getElementById(containerId);
+            if (!data) { container.innerHTML = '<div class="loader">Failed to load data.</div>'; return; }
+            if (data.length === 0) { container.innerHTML = '<div>No data available.</div>'; return; }
+            
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+            thead.innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+            
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                let cellHtml = dataKeys.map(key => {
+                    let value = item[key];
+                    let displayValue = value;
 
-        const queries = await fetchQueriesByHour(hour);
-        renderQueriesTable(queries);
-      }
-    }
-  });
-}
+                    if (typeof value === 'number') displayValue = value.toLocaleString();
+                    
+                    if (key === linkKey) {
+                        if (String(value).length > 25) displayValue = `<span title="${value}">${String(value).substring(0, 25)}...</span>`;
+                        return `<td><a href="#" class="clickable-link" data-type="${linkKey}" data-value="${value}">${displayValue}</a></td>`;
+                    }
+                    
+                    return `<td>${displayValue}</td>`;
+                }).join('');
+                row.innerHTML = cellHtml;
+                tbody.appendChild(row);
+            });
+            
+            table.append(thead, tbody);
+            container.innerHTML = '';
+            container.appendChild(table);
+        };
 
-function renderQueriesTable(queries) {
-  const table = document.getElementById('queriesTable');
-  const tbody = table.querySelector('tbody');
-  tbody.innerHTML = '';
+        const modal = document.getElementById('details-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        const showModal = () => modal.style.display = 'flex';
+        const hideModal = () => modal.style.display = 'none';
 
-  if (queries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6">No DNS queries found for this hour.</td></tr>';
-  } else {
-    for (const q of queries) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${q.timestamp}</td>
-        <td>${q.src_ip}</td>
-        <td>${q.dst_ip}</td>
-        <td>${q.name}</td>
-        <td>${q.type}</td>
-        <td>${q.class}</td>
-      `;
-      tbody.appendChild(tr);
-    }
-  }
+        document.getElementById('modal-close').addEventListener('click', hideModal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) hideModal();
+        });
 
-  table.style.display = 'table';
-}
+        const fetchAndShowDomainDetails = async (domain) => {
+            modalTitle.textContent = `Details for: ${domain}`;
+            modalBody.innerHTML = '<div class="loader">Loading details...</div>';
+            showModal();
+            
+            const details = await fetchData(`/details?name=${encodeURIComponent(domain)}`, currentRange);
+            if (!details) { modalBody.innerHTML = '<div>Failed to load details.</div>'; return; }
+            if (details.length === 0) { modalBody.innerHTML = '<div>No query details found for this domain in the selected time range.</div>'; return; }
 
-fetchData().then(data => renderChart(data));
+            renderTable('modal-body', ['Query Time', 'DNS Server', 'Latency (ms)'], details, ['timestamp', 'dns_server', 'latency'], null);
+        };
+
+        const fetchAndShowServerDetails = async (serverIp) => {
+            modalTitle.textContent = `Domains queried via: ${serverIp}`;
+            modalBody.innerHTML = '<div class="loader">Loading details...</div>';
+            showModal();
+            
+            const details = await fetchData(`/server-details?ip=${encodeURIComponent(serverIp)}`, currentRange);
+            if (!details) { modalBody.innerHTML = '<div>Failed to load details.</div>'; return; }
+            if (details.length === 0) { modalBody.innerHTML = '<div>No domains found for this server in the selected time range.</div>'; return; }
+
+            renderTable('modal-body', ['Queried Domain', 'Query Count'], details, ['name', 'count'], 'name');
+        };
+
+        document.querySelector('.container').addEventListener('click', (event) => {
+            const link = event.target.closest('.clickable-link');
+            if (!link) return;
+
+            event.preventDefault();
+            const type = link.dataset.type;
+            const value = link.dataset.value;
+
+            if (type === 'name') {
+                fetchAndShowDomainDetails(value);
+            } else if (type === 'ip') {
+                fetchAndShowServerDetails(value);
+            }
+        });
+
+        const loadDashboardData = (range) => {
+            const rangeTextMap = { '24h': '(24 Hours)', '7d': '(7 Days)', '30d': '(30 Days)' };
+            const rangeText = rangeTextMap[range] || `(${range})`;
+            document.querySelectorAll('.card h2').forEach(h2 => {
+                const baseTitle = h2.textContent.split('(')[0].trim();
+                h2.textContent = `${baseTitle} ${rangeText}`;
+            });
+            
+            fetchData('/kpis', range).then(renderKPIs);
+            fetchData('/timeseries', range).then(renderTimeseriesChart);
+            fetchData('/top-domains', range).then(data => renderTable('top-domains-container', ['Domain', 'Count'], data, ['name', 'count'], 'name'));
+            fetchData('/top-servers', range).then(data => renderTable('top-servers-container', ['Server IP', 'Query Count'], data, ['ip', 'count'], 'ip'));
+        };
+        
+        document.querySelectorAll('.range-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                document.querySelector('.range-btn.active').classList.remove('active');
+                button.classList.add('active');
+                currentRange = button.dataset.range;
+                loadDashboardData(currentRange);
+            });
+        });
+
+        loadDashboardData(currentRange);
+    });
 </script>
 </body>
 </html>
-
